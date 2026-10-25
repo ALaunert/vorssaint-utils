@@ -25,10 +25,17 @@ struct CachedSensorReading {
 enum TemperatureSensorSelector {
     static let minimumChipTemperature = 10.0
 
+    // The alternate M1 layout was read on a MacBook Pro 13-inch
+    // (MacBookPro17,1) on macOS 27 and reported on a Mac mini (Macmini9,1,
+    // #1353), neither of which carries any key of the original layout.
+    // In contributed idle and load samples, Tp<n>a and Te<n>a tracked the
+    // named pACC/eACC MTR die sensors with the same index. Keep the b, x
+    // and z variants auxiliary; most read above those die sensors.
     private static let appleM1CPUCoreKeys: Set<String> = [
         "Tp09", "Tp0T",
         "Tp01", "Tp05", "Tp0D", "Tp0H",
         "Tp0L", "Tp0P", "Tp0X", "Tp0b",
+        "Tp2a", "Tp3a", "Tp4a", "Tp5a", "Tp7a", "Tp8a", "Tp9a", "Te0a", "Te3a",
     ]
 
     private static let appleM2CPUCoreKeys: Set<String> = [
@@ -72,7 +79,6 @@ enum TemperatureSensorSelector {
         // Preserve the established Tp/Te reading path for this supported chip
         // until a verified per-core map is available.
         if brand == "Apple A18 Pro" { return .generic }
-        if brand == "Apple M4 Max" { return .appleM4MaxFamily }
         switch appleSiliconGeneration(in: brand) {
         case 1: return .appleM1Family
         case 2: return .appleM2Family
@@ -88,23 +94,26 @@ enum TemperatureSensorSelector {
             return .unmappedAppleSilicon
         }
         let identified = platform(brandString: brand)
-        guard identified == .appleM4MaxFamily else { return identified }
+        guard brand.trimmingCharacters(in: .whitespacesAndNewlines) == "Apple M4 Max" else {
+            return identified
+        }
         return platform(brandString: brand,
                         modelIdentifier: sysctlString("hw.model"),
                         performanceCoreCount: sysctlInteger("hw.perflevel0.physicalcpu"),
                         efficiencyCoreCount: sysctlInteger("hw.perflevel1.physicalcpu"))
     }
 
-    /// Other M4 Max configurations retain the unmapped display fallback and
-    /// cannot supply unverified CPU fan inputs.
+    /// Only the measured Max configuration opts into the region map. Other
+    /// configurations and incomplete discovery keep the existing M4 readings
+    /// for the display, alerts, and CPU/SoC fan curves.
     static func platform(brandString: String?, modelIdentifier: String?,
                          performanceCoreCount: Int?, efficiencyCoreCount: Int?) -> CPUTemperaturePlatform {
         let identified = platform(brandString: brandString)
-        guard identified == .appleM4MaxFamily else { return identified }
-        guard modelIdentifier == "Mac16,5", performanceCoreCount == 10, efficiencyCoreCount == 4 else {
-            return .unmappedAppleSilicon
+        guard brandString?.trimmingCharacters(in: .whitespacesAndNewlines) == "Apple M4 Max",
+              modelIdentifier == "Mac16,5", performanceCoreCount == 10, efficiencyCoreCount == 4 else {
+            return identified
         }
-        return identified
+        return .appleM4MaxFamily
     }
 
     private static func sysctlString(_ name: String) -> String? {
